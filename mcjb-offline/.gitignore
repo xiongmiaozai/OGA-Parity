@@ -1,0 +1,27 @@
+# 构建产物
+app/build/
+build/
+.gradle/
+*.apk
+!*.apk  # 如需归档发布包可手动放行，默认忽略本地产物
+
+# 本地配置（由 Android Studio / 本地环境生成）
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+
+# Python 缓存
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 运行期生成的数据（databases / 上传 / 产物 / 日志 / 预览）
+app/src/main/python/data/
+*.db
+*.log
+
+# 操作系统
+.DS_Store
+Thumbs.db

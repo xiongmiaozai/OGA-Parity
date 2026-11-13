@@ -1,0 +1,56 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.mcjb2vv.offline'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.mcjb2vv.offline'
+        minSdk 24
+        targetSdk 34
+        versionCode 3
+        versionName '1.2.0'
+        // 只打主流真机 ABI，控制体积；需要模拟器可加 x86_64
+        ndk { abiFilters 'arm64-v8a' }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    // 规则 JSON 放 assets，运行时复制到可写目录供 core.convert 读取
+    sourceSets {
+        main {
+            python { srcDirs = ['src/main/python'] }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = '3.11'
+        // 构建期用于 pip 解析 wheel 的本机 Python（须与 3.11 对齐）
+        buildPython '/root/.pyenv/versions/3.11.1/bin/python3.11'
+        pip {
+            // Android 版预编译 wheel（chaquo CDN），与项目 Python 3.11 对齐
+            install 'numpy==1.26.2'
+            install 'Pillow==9.2.0'
+        }
+        pyc {
+            src = false     // 直接用 .py，避免 bytecode 版本差异
+            pip = false
+            stdlib = false
+        }
+    }
+}

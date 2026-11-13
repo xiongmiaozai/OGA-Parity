@@ -1,0 +1,37 @@
+# ============================================================
+# MC 材质转换器 —— 顶层仓库忽略规则（monorepo）
+# 各子项目（mc-jb2vv、mcjb-offline）内的 .gitignore 仍独立生效。
+# ============================================================
+
+# ---- 交付 / 运行产物（体积大，不入库）----
+*.apk
+*.apks
+*.aab
+*.aab
+*.idsig
+*.mcpack
+*.mcworld
+*.mctemplate
+
+# ---- 构建缓存 ----
+.gradle/
+build/
+**/build/
+.externalNativeBuild/
+captures/
+*.iml
+
+# ---- 本地密钥与配置 ----
+*.keystore
+local.properties
+
+# ---- 日志 ----
+*.log
+
+# ---- 沙箱 / 编辑器 / 系统 ----
+.codebuddy/
+.cloudstudio/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
