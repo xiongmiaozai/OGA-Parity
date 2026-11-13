@@ -35,3 +35,6 @@ local.properties
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 云开发环境文件
+.cloudstudio
