@@ -5,6 +5,19 @@
 
 ---
 
+## [1.3.0] — 2026-11-14（versionCode 4）
+
+### UI（鸿蒙/HarmonyOS 风格改造，仍 100% 离线）
+- 在上一版 Material Design 3 基础上，按华为 EMUI / HarmonyOS 设计语言重做视觉：
+  - **翡翠绿主色 + 鸿蒙蓝**（导入按钮），柔和中性灰背景。
+  - **大圆角**：卡片 22dp（轻投影）、按钮与分段控件胶囊化（100dp 圆角）、进度条圆角翡翠绿。
+  - 顶栏加高至 56dp、标题 18sp，舒适留白与卡片内边距。
+- 引入 AndroidX + Material Components（`appcompat` / `material` / `constraintlayout`），
+  `useAndroidX=true`；主题改为 `Theme.Material3.DayNight`，自动深色模式保留。
+- **不引入任何华为/HMS 依赖**：鸿蒙观感由主题配色与组件样式复刻，保持离线、零联网权限、arm64 通用。
+
+---
+
 ## [1.2.0] — 2026-11-14（versionCode 3）
 
 ### 性能

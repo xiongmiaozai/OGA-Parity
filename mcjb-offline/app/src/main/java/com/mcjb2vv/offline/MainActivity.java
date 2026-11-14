@@ -1,15 +1,11 @@
 package com.mcjb2vv.offline;
 
 import android.Manifest;
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -22,14 +18,25 @@ import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.CheckBox;
-import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
+
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.button.MaterialButtonToggleGroup;
+import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.chip.Chip;
+import com.google.android.material.chip.ChipGroup;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.progressindicator.LinearProgressIndicator;
+import com.google.android.material.switchmaterial.SwitchMaterial;
+import com.google.android.material.appbar.MaterialToolbar;
 
 import com.chaquo.python.PyObject;
 import com.chaquo.python.Python;
@@ -47,14 +54,19 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 完全离线版主界面（v1.2 重做）。
+ * 完全离线版主界面（v1.3，鸿蒙/HarmonyOS 风格改造，基于 Material 3 主题）。
  *
- * 分区卡片设计，全程不联网：
+ * 视觉对照华为 EMUI / HarmonyOS 设计语言：
+ *   - 翡翠绿主色 + 鸿蒙蓝（导入按钮），柔和中性灰背景
+ *   - 大圆角卡片（22dp）、胶囊化按钮与分段控件、轻投影、舒适留白
+ *   - 组件：MaterialToolbar / MaterialButton / SwitchMaterial / MaterialButtonToggleGroup
+ *           / ChipGroup / MaterialCardView / LinearProgressIndicator / MaterialAlertDialog
+ * 分区卡片结构（全程不联网）：
  *   顶栏 → 预设 → 选项（兼容/性能/线程/上限）→ 选择 → 进度(可取消) → 结果(校验+预览+导入+历史)
  * 转换内核是打包进 APK 的 Python core/（Chaquopy 运行时）。所有 Python 调用串行在
  * 同一后台线程，避免 Chaquopy 线程状态问题；S5 阶段的多线程并行由 Python 侧线程池负责。
  */
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
 
     private static final int REQ_FILE = 2001;
     private static final int REQ_PERM = 2002;
@@ -63,12 +75,14 @@ public class MainActivity extends Activity {
     private final ExecutorService pyExec = Executors.newSingleThreadExecutor();
 
     private TextView statusText, stageText, logText;
-    private ProgressBar progress;
-    private TextView pickBtn, importBtn, historyBtn, cancelBtn, fileInfoText;
-    private CheckBox compatBox, perfBox;
-    private LinearLayout presetRow, previewGrid, resultCard, sizeSeg, threadSeg;
+    private LinearProgressIndicator progress;
+    private MaterialButton pickBtn, importBtn, historyBtn, cancelBtn;
+    private SwitchMaterial compatBox, perfBox;
+    private ChipGroup presetGroup;
+    private LinearLayout previewGrid, threadSeg, sizeSeg;
+    private MaterialCardView resultCard;
     private ScrollView logScroll;
-    private TextView resultTitle, resultMeta;
+    private TextView resultTitle, resultMeta, fileInfoText;
 
     private volatile boolean initialized = false;
     private volatile boolean converting = false;
@@ -77,34 +91,35 @@ public class MainActivity extends Activity {
     private int selectedThreads = 0;   // 0=自动
     private int selectedMaxSize = 2048;
     private File rulesDir, dataDir, cacheZip;
+    private String currentTid = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         float dp = getResources().getDisplayMetrics().density;
-        int pad = (int) (12 * dp);
 
         dataDir = new File(getFilesDir(), "mcjb");
         rulesDir = new File(dataDir, "rules");
         cacheZip = new File(getCacheDir(), "input_pack.zip");
         copyAssetRules();
 
-        // ---- 顶栏 ----
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setBackgroundColor(Color.parseColor("#1B3A2B"));
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(pad, (int) (12 * dp), pad, (int) (12 * dp));
-        TextView title = new TextView(this);
-        title.setText("MC 材质转换器 · 离线");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(16);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        // ---- 顶栏（MaterialToolbar + 离线徽标）----
+        MaterialToolbar bar = new MaterialToolbar(this);
+        bar.setTitle("MC 材质转换器 · 离线");
+        bar.setTitleTextColor(Color.WHITE);
+        bar.setMinimumHeight((int) (56 * dp));
+        bar.setBackgroundColor(Color.parseColor("#00713A"));
+        int barPad = (int) (12 * dp);
+        bar.setPadding(barPad, barPad, barPad, barPad);
+
         TextView badge = new TextView(this);
-        badge.setText("100% 本地 · 无需联网");
-        badge.setTextColor(Color.parseColor("#A8DCC0"));
+        badge.setText(R.string.offline_badge);
+        badge.setTextColor(Color.parseColor("#B8E6CC"));
         badge.setTextSize(11);
+        MaterialToolbar.LayoutParams blp = new MaterialToolbar.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.gravity = Gravity.END;
+        badge.setLayoutParams(blp);
         bar.addView(badge);
 
         // ---- 主体（可滚动）----
@@ -117,26 +132,26 @@ public class MainActivity extends Activity {
 
         // ---- 预设 ----
         body.addView(sectionLabel("转换预设"));
-        presetRow = new LinearLayout(this);
-        presetRow.setOrientation(LinearLayout.HORIZONTAL);
-        HorizontalScrollView hsv = new HorizontalScrollView(this);
-        hsv.setHorizontalScrollBarEnabled(false);
-        hsv.addView(presetRow);
-        body.addView(hsv);
+        presetGroup = new ChipGroup(this);
+        presetGroup.setSingleSelection(true);
+        presetGroup.setSelectionRequired(false);
+        ScrollView presetScroll = new ScrollView(this);
+        presetScroll.setHorizontalScrollBarEnabled(true);
+        presetScroll.addView(presetGroup);
+        body.addView(presetScroll);
 
         // ---- 选项 ----
         body.addView(sectionLabel("转换选项"));
-        compatBox = mkCheck("兼容模式（去 PBR / 引擎门槛 1.20.0，旧设备可用）");
-        perfBox = mkCheck("性能模式（极速编码 + 贴图上限 256，更快更小，略损细节）");
+        compatBox = mkSwitch("兼容模式（去 PBR / 引擎门槛 1.20.0，旧设备可用）");
+        perfBox = mkSwitch("性能模式（极速编码 + 贴图上限 256，更快更小，略损细节）");
         body.addView(compatBox);
         body.addView(perfBox);
 
-        // 线程分段
         LinearLayout threadWrap = new LinearLayout(this);
         threadWrap.setOrientation(LinearLayout.HORIZONTAL);
         threadWrap.setGravity(Gravity.CENTER_VERTICAL);
         threadWrap.addView(mkText("线程：", 13, "#444C58"));
-        threadSeg = mkSegment(new String[]{"自动", "4", "8"}, 0, new SegPick() {
+        threadSeg = mkToggle(new String[]{"自动", "4", "8"}, 0, new TogglePick() {
             @Override public void onPick(int idx, String label) {
                 selectedThreads = idx == 0 ? 0 : Integer.parseInt(label);
             }
@@ -144,12 +159,11 @@ public class MainActivity extends Activity {
         threadWrap.addView(threadSeg);
         body.addView(threadWrap);
 
-        // 上限分段
         LinearLayout sizeWrap = new LinearLayout(this);
         sizeWrap.setOrientation(LinearLayout.HORIZONTAL);
         sizeWrap.setGravity(Gravity.CENTER_VERTICAL);
         sizeWrap.addView(mkText("贴图上限：", 13, "#444C58"));
-        sizeSeg = mkSegment(new String[]{"512", "1024", "2048"}, 2, new SegPick() {
+        sizeSeg = mkToggle(new String[]{"512", "1024", "2048"}, 2, new TogglePick() {
             @Override public void onPick(int idx, String label) {
                 selectedMaxSize = Integer.parseInt(label);
             }
@@ -159,25 +173,28 @@ public class MainActivity extends Activity {
 
         // ---- 选择卡 ----
         body.addView(sectionLabel("选择资源包"));
-        LinearLayout pickCard = card(0xFFF4F8F5);
-        pickBtn = mkButton("点击选择 Java 资源包（.zip / .mcpack）", "#2E7D4F",
+        MaterialCardView pickCard = card(0xFFF2F8F4, dp);
+        pickBtn = mkButton("点击选择 Java 资源包（.zip / .mcpack）", "#009A4E",
                 new View.OnClickListener() {
                     @Override public void onClick(View v) { pickFile(); }
                 });
         pickBtn.setEnabled(false);
-        fileInfoText = mkText("支持 Java 版材质包；转换全程在你的设备本地完成。", 12, "#6B7686");
-        LinearLayout.LayoutParams fp = (LinearLayout.LayoutParams) pickBtn.getLayoutParams();
-        fp.bottomMargin = (int) (8 * dp);
+        fileInfoText = mkText(getString(R.string.pick_hint), 12, "#6B7686");
         pickCard.addView(pickBtn);
         pickCard.addView(fileInfoText);
         body.addView(pickCard);
 
-        // ---- 进度卡 ----
-        progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        // ---- 进度 ----
+        progress = new LinearProgressIndicator(this);
+        progress.setIndeterminate(false);
         progress.setMax(100);
-        progress.setProgress(0);
+        progress.setTrackThickness((int) (6 * dp));
+        progress.setTrackCornerRadius((int) (3 * dp));
+        progress.setIndicatorColor(Color.parseColor("#009A4E"));
+        progress.setTrackColor(Color.parseColor("#DDE8E1"));
+        progress.setProgressCompat(0, false);
         LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, (int) (5 * dp));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         pLp.topMargin = (int) (14 * dp);
         body.addView(progress, pLp);
 
@@ -187,16 +204,16 @@ public class MainActivity extends Activity {
         sLp.topMargin = (int) (6 * dp);
         body.addView(stageText, sLp);
 
-        cancelBtn = mkButton("取消转换", "#B0413E", new View.OnClickListener() {
+        cancelBtn = mkButton("取消转换", "#D94838", new View.OnClickListener() {
             @Override public void onClick(View v) { doCancel(); }
         });
         cancelBtn.setVisibility(View.GONE);
         body.addView(cancelBtn);
 
         // ---- 结果卡 ----
-        resultCard = card(0xFFF1F6F1);
+        resultCard = card(0xFFF0F6F2, dp);
         resultCard.setVisibility(View.GONE);
-        resultTitle = mkText("", 15, "#1B3A2B");
+        resultTitle = mkText("", 15, "#00713A");
         resultTitle.setTypeface(Typeface.DEFAULT_BOLD);
         resultMeta = mkText("", 12, "#5A6472");
         previewGrid = new LinearLayout(this);
@@ -205,13 +222,13 @@ public class MainActivity extends Activity {
         resultCard.addView(resultTitle);
         resultCard.addView(resultMeta);
         resultCard.addView(previewGrid);
-        importBtn = mkButton("用 Minecraft 基岩版打开 .mcpack", "#3B6FD4",
+        importBtn = mkButton("用 Minecraft 基岩版打开 .mcpack", "#0A59F7",
                 new View.OnClickListener() {
                     @Override public void onClick(View v) { openImport(); }
                 });
         importBtn.setVisibility(View.GONE);
         resultCard.addView(importBtn);
-        historyBtn = mkButton("查看转换历史", "#5A6472", new View.OnClickListener() {
+        historyBtn = mkButton("查看转换历史", "#6B7686", new View.OnClickListener() {
             @Override public void onClick(View v) { showHistory(); }
         });
         resultCard.addView(historyBtn);
@@ -242,12 +259,12 @@ public class MainActivity extends Activity {
         setContentView(root);
 
         if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                    != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_PERM);
         }
         if (Build.VERSION.SDK_INT <= 28
-                && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
                    != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_PERM);
         }
@@ -264,7 +281,7 @@ public class MainActivity extends Activity {
 
     private TextView sectionLabel(String s) {
         float dp = getResources().getDisplayMetrics().density;
-        TextView t = mkText(s, 13, "#2E7D4F");
+        TextView t = mkText(s, 13, "#009A4E");
         t.setTypeface(Typeface.DEFAULT_BOLD);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -273,40 +290,44 @@ public class MainActivity extends Activity {
         return t;
     }
 
-    private CheckBox mkCheck(String text) {
+    private SwitchMaterial mkSwitch(String text) {
         float dp = getResources().getDisplayMetrics().density;
-        CheckBox c = new CheckBox(this);
-        c.setText(text);
-        c.setTextSize(13);
-        c.setTextColor(Color.parseColor("#444C58"));
+        SwitchMaterial sw = new SwitchMaterial(this);
+        sw.setText(text);
+        sw.setTextSize(13);
+        sw.setChecked(false);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = (int) (6 * dp);
-        c.setLayoutParams(lp);
-        return c;
+        sw.setLayoutParams(lp);
+        return sw;
     }
 
-    private TextView mkButton(String text, String bg, View.OnClickListener l) {
+    private MaterialButton mkButton(String text, String bg, View.OnClickListener l) {
         float dp = getResources().getDisplayMetrics().density;
-        TextView t = new TextView(this);
-        t.setText(text); t.setTextColor(Color.WHITE); t.setTextSize(15);
-        t.setGravity(Gravity.CENTER);
-        t.setBackgroundColor(Color.parseColor(bg));
-        t.setPadding((int) (14 * dp), (int) (13 * dp), (int) (14 * dp), (int) (13 * dp));
+        MaterialButton b = new MaterialButton(this);
+        b.setText(text);
+        b.setTextColor(Color.WHITE);
+        b.setTextSize(15);
+        b.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor(bg)));
+        b.setCornerRadius((int) (100 * dp));
+        b.setPadding((int) (20 * dp), (int) (12 * dp), (int) (20 * dp), (int) (12 * dp));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = (int) (10 * dp);
-        t.setLayoutParams(lp);
-        t.setOnClickListener(l); t.setClickable(true); t.setFocusable(true);
-        return t;
+        b.setLayoutParams(lp);
+        b.setOnClickListener(l);
+        return b;
     }
 
-    private LinearLayout card(int bg) {
-        float dp = getResources().getDisplayMetrics().density;
-        LinearLayout c = new LinearLayout(this);
-        c.setOrientation(LinearLayout.VERTICAL);
-        c.setBackgroundColor(bg);
-        c.setPadding((int) (14 * dp), (int) (12 * dp), (int) (14 * dp), (int) (12 * dp));
+    private MaterialCardView card(int bg, float dp) {
+        MaterialCardView c = new MaterialCardView(this);
+        c.setCardBackgroundColor(ColorStateList.valueOf(bg));
+        c.setRadius(22 * dp);
+        c.setCardElevation(4 * dp);
+        c.setContentPadding((int) (16 * dp), (int) (14 * dp), (int) (16 * dp), (int) (14 * dp));
+        c.setStrokeColor(ColorStateList.valueOf(Color.parseColor("#E2E8E6")));
+        c.setStrokeWidth((int) (1 * dp));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = (int) (8 * dp);
@@ -314,43 +335,55 @@ public class MainActivity extends Activity {
         return c;
     }
 
-    /** 分段选择器：一组互斥按钮，选中高亮。 */
-    private interface SegPick { void onPick(int idx, String label); }
+    /** M3 分段选择器：MaterialButtonToggleGroup（互斥、选中高亮）。 */
+    private interface TogglePick { void onPick(int idx, String label); }
 
-    private LinearLayout mkSegment(String[] labels, int defIdx, final SegPick pick) {
+    private LinearLayout mkToggle(String[] labels, int defIdx, final TogglePick pick) {
         float dp = getResources().getDisplayMetrics().density;
-        final LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        final List<TextView> btns = new ArrayList<>();
-        final int[] cur = {defIdx};
+        MaterialButtonToggleGroup g = new MaterialButtonToggleGroup(this);
+        g.setSingleSelection(true);
+        final int[] defId = {-1};
+        ColorStateList bgOn = ColorStateList.valueOf(Color.parseColor("#009A4E"));
+        ColorStateList bgOff = ColorStateList.valueOf(Color.parseColor("#E8EEF0"));
+        ColorStateList txOn = ColorStateList.valueOf(Color.WHITE);
+        ColorStateList txOff = ColorStateList.valueOf(Color.parseColor("#33414B"));
         for (int i = 0; i < labels.length; i++) {
+            final MaterialButton b = new MaterialButton(this,
+                    null, com.google.android.material.R.style.Widget_Material3_Button_OutlinedButton);
             final int idx = i;
-            TextView b = new TextView(this);
+            b.setId(View.generateViewId());
             b.setText(labels[i]);
             b.setTextSize(13);
-            b.setGravity(Gravity.CENTER);
-            b.setPadding((int) (14 * dp), (int) (6 * dp), (int) (14 * dp), (int) (6 * dp));
-            b.setBackgroundColor(Color.parseColor(idx == defIdx ? "#2E7D4F" : "#DDE5DF"));
-            b.setTextColor(Color.parseColor(idx == defIdx ? "#FFFFFF" : "#33414B"));
+            b.setCornerRadius((int) (100 * dp));
+            b.setTag(labels[i]);
+            b.setBackgroundTintList(i == defIdx ? bgOn : bgOff);
+            b.setTextColor(i == defIdx ? txOn : txOff);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.rightMargin = (int) (6 * dp);
             b.setLayoutParams(lp);
-            b.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    cur[0] = idx;
-                    for (int j = 0; j < btns.size(); j++) {
-                        boolean on = j == idx;
-                        btns.get(j).setBackgroundColor(Color.parseColor(on ? "#2E7D4F" : "#DDE5DF"));
-                        btns.get(j).setTextColor(Color.parseColor(on ? "#FFFFFF" : "#33414B"));
-                    }
-                    pick.onPick(idx, labels[idx]);
-                }
-            });
-            btns.add(b);
-            row.addView(b);
+            g.addView(b);
+            if (i == defIdx) defId[0] = b.getId();
         }
-        return row;
+        g.check(defId[0]);
+        g.addOnButtonCheckedListener(new MaterialButtonToggleGroup.OnButtonCheckedListener() {
+            @Override public void onButtonChecked(MaterialButtonToggleGroup group,
+                                                  int checkedId, boolean isChecked) {
+                if (!isChecked) return;
+                for (int i = 0; i < group.getChildCount(); i++) {
+                    MaterialButton b = (MaterialButton) group.getChildAt(i);
+                    boolean on = b.getId() == checkedId;
+                    b.setBackgroundTintList(on ? bgOn : bgOff);
+                    b.setTextColor(on ? txOn : txOff);
+                }
+                Object tag = group.findViewById(checkedId).getTag();
+                if (tag != null) pick.onPick(group.indexOfChild(group.findViewById(checkedId)), tag.toString());
+            }
+        });
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.HORIZONTAL);
+        wrap.addView(g);
+        return wrap;
     }
 
     private void copyAssetRules() {
@@ -399,39 +432,40 @@ public class MainActivity extends Activity {
     }
 
     private void buildPresets(String json) {
-        float dp = getResources().getDisplayMetrics().density;
-        presetRow.removeAllViews();
+        presetGroup.removeAllViews();
         try {
             JSONArray arr = new JSONArray(json);
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject p = arr.getJSONObject(i);
                 final String id = p.optString("id", "vv_standard");
                 final String name = p.optString("name", id);
-                final TextView chip = new TextView(this);
+                final Chip chip = new Chip(this,
+                        null, com.google.android.material.R.style.Widget_Material3_Chip_Filter);
                 chip.setText(name);
-                chip.setTextSize(12);
-                chip.setGravity(Gravity.CENTER);
-                chip.setPadding((int) (12 * dp), (int) (7 * dp), (int) (12 * dp), (int) (7 * dp));
-                final boolean on = id.equals(selectedPreset);
-                chip.setBackgroundColor(Color.parseColor(on ? "#2E7D4F" : "#E3EBE5"));
-                chip.setTextColor(Color.parseColor(on ? "#FFFFFF" : "#33414B"));
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                lp.rightMargin = (int) (8 * dp);
-                chip.setLayoutParams(lp);
-                chip.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) {
-                        selectedPreset = id;
-                        for (int k = 0; k < presetRow.getChildCount(); k++) {
-                            TextView c = (TextView) presetRow.getChildAt(k);
-                            boolean o = c == chip;
-                            c.setBackgroundColor(Color.parseColor(o ? "#2E7D4F" : "#E3EBE5"));
-                            c.setTextColor(Color.parseColor(o ? "#FFFFFF" : "#33414B"));
+                chip.setCheckable(true);
+                chip.setChecked(id.equals(selectedPreset));
+                chip.setTag(id);
+                ColorStateList cOn = ColorStateList.valueOf(Color.parseColor("#009A4E"));
+                ColorStateList cOff = ColorStateList.valueOf(Color.parseColor("#E8EEF0"));
+                ColorStateList tOn = ColorStateList.valueOf(Color.WHITE);
+                ColorStateList tOff = ColorStateList.valueOf(Color.parseColor("#33414B"));
+                chip.setChipBackgroundColor(i == 0 ? cOn : cOff);
+                chip.setTextColor(i == 0 ? tOn : tOff);
+                chip.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+                    @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean checked) {
+                        if (checked) {
+                            selectedPreset = id;
+                            for (int k = 0; k < presetGroup.getChildCount(); k++) {
+                                Chip c = (Chip) presetGroup.getChildAt(k);
+                                boolean o = c == chip;
+                                c.setChipBackgroundColor(o ? cOn : cOff);
+                                c.setTextColor(o ? tOn : tOff);
+                            }
+                            appendLog("预设：" + name);
                         }
-                        appendLog("预设：" + name);
                     }
                 });
-                presetRow.addView(chip);
+                presetGroup.addView(chip);
             }
         } catch (Exception ignored) { }
     }
@@ -477,7 +511,7 @@ public class MainActivity extends Activity {
         perfBox.setEnabled(false);
         cancelBtn.setVisibility(View.VISIBLE);
         resultCard.setVisibility(View.GONE);
-        progress.setProgress(0);
+        progress.setProgressCompat(0, false);
         logText.setText("");
         appendLog("输入：" + cacheZip.length() / 1024 + " KB");
 
@@ -518,7 +552,7 @@ public class MainActivity extends Activity {
                         final String eta = s.optString("eta_text", "");
                         final String elapsed = s.optString("elapsed_text", "");
                         ui(() -> {
-                            progress.setProgress(pct);
+                            progress.setProgressCompat(pct, true);
                             StringBuilder sb = new StringBuilder();
                             sb.append(pct).append("% · ").append(stage);
                             if (!file.isEmpty()) sb.append(" · ").append(file);
@@ -572,8 +606,6 @@ public class MainActivity extends Activity {
         });
     }
 
-    private String currentTid = "";
-
     private void finishConvert(JSONObject s) {
         final String state = s.optString("state", "");
         final String err = s.optString("error", "");
@@ -589,10 +621,10 @@ public class MainActivity extends Activity {
                 statusText.setText("请检查输入包是否为有效 Java 资源包");
                 return;
             }
-            progress.setProgress(100);
+            progress.setProgressCompat(100, true);
             File out = new File(outPath);
             resultCard.setVisibility(View.VISIBLE);
-            resultTitle.setText("✅ 转换完成 · 12 项校验通过");
+            resultTitle.setText("✅ 转换完成 · 校验通过");
             resultMeta.setText(out.getName() + "（" + out.length() / 1024 + " KB）· 已用 "
                     + s.optString("elapsed_text", ""));
             buildPreview(s.optJSONObject("previews"));
@@ -677,8 +709,8 @@ public class MainActivity extends Activity {
                 list.addView(row);
             } catch (Exception ignored) { }
         }
-        new AlertDialog.Builder(this)
-                .setTitle("转换历史（最近 " + rows.length() + " 条）")
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.history_title) + "（最近 " + rows.length() + " 条）")
                 .setView(list)
                 .setPositiveButton("关闭", null)
                 .show();
@@ -734,7 +766,7 @@ public class MainActivity extends Activity {
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(i);
         } catch (Exception e) {
-            new AlertDialog.Builder(this)
+            new MaterialAlertDialogBuilder(this)
                     .setTitle("无法直接打开")
                     .setMessage("请到系统「下载」目录找到 .mcpack 文件，点击后选择 Minecraft 基岩版导入。\n\n" + e)
                     .setPositiveButton("知道了", null).show();
@@ -743,18 +775,18 @@ public class MainActivity extends Activity {
 
     private void notifyDone(String name, Uri uri) {
         try {
-            NotificationManager nm =
-                    (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            android.app.NotificationManager nm =
+                    (android.app.NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (Build.VERSION.SDK_INT >= 26) {
-                nm.createNotificationChannel(new NotificationChannel(CHANNEL,
-                        "转换完成", NotificationManager.IMPORTANCE_HIGH));
+                nm.createNotificationChannel(new android.app.NotificationChannel(CHANNEL,
+                        "转换完成", android.app.NotificationManager.IMPORTANCE_HIGH));
             }
             Intent open = new Intent(Intent.ACTION_VIEW);
             open.setDataAndType(uri, "application/octet-stream");
             open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-            if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
-            PendingIntent pi = PendingIntent.getActivity(this, 1, open, flags);
+            int flags = android.app.PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) flags |= android.app.PendingIntent.FLAG_IMMUTABLE;
+            android.app.PendingIntent pi = android.app.PendingIntent.getActivity(this, 1, open, flags);
             android.app.Notification.Builder b = Build.VERSION.SDK_INT >= 26
                     ? new android.app.Notification.Builder(this, CHANNEL)
                     : new android.app.Notification.Builder(this);

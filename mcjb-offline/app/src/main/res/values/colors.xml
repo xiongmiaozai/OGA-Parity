@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 鸿蒙/HarmonyOS 风格配色（翡翠绿主色 + 舒适中性灰，呼应 EMUI/HarmonyOS 设计语言） -->
+    <color name="green_primary">#009A4E</color>
+    <color name="green_on_primary">#FFFFFF</color>
+    <color name="green_primary_container">#B8E6CC</color>
+    <color name="green_on_primary_container">#00210F</color>
+    <color name="green_secondary">#547B6E</color>
+    <color name="green_on_secondary">#FFFFFF</color>
+    <color name="green_tertiary">#0A59F7</color>
+    <color name="green_background">#F6F8F7</color>
+    <color name="green_surface">#FFFFFF</color>
+    <color name="green_surface_variant">#E8EEF0</color>
+    <color name="green_on_surface">#1A1C1E</color>
+    <color name="green_on_surface_variant">#3F4945</color>
+    <color name="green_outline">#C9D3D0</color>
+    <color name="green_error">#D94838</color>
+    <color name="green_error_container">#FFDAD6</color>
+    <color name="green_topbar">#00713A</color>
+</resources>

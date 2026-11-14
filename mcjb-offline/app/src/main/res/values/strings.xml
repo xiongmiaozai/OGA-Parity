@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MC 材质转换器·离线</string>
+    <string name="offline_badge">100% 本地 · 无需联网</string>
+    <string name="pick_hint">支持 Java 版材质包；转换全程在你的设备本地完成。</string>
+    <string name="history_title">转换历史</string>
 </resources>
