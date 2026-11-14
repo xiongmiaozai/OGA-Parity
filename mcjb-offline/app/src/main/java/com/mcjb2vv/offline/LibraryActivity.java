@@ -118,6 +118,11 @@ public class LibraryActivity extends AppCompatActivity {
         clp.topMargin = (int) (8 * dp);
         c.setLayoutParams(clp);
 
+        // MaterialCardView 是 FrameLayout：直接 addView 多子控件会叠在左上角互相覆盖。
+        // 用一个纵向 LinearLayout 承载内容，卡片自然竖向排列。
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+
         TextView title = mkText(it.name, 14, "#00713A");
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         String sub = humanSize(it.size) + " · " + fmtTime(it.createdAt);
@@ -141,9 +146,10 @@ public class LibraryActivity extends AppCompatActivity {
         row.addView(dlBtn);
         row.addView(delBtn);
 
-        c.addView(title);
-        c.addView(meta);
-        c.addView(row);
+        inner.addView(title);
+        inner.addView(meta);
+        inner.addView(row);
+        c.addView(inner);
         return c;
     }
 

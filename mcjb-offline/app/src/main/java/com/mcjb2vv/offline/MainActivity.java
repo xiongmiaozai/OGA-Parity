@@ -10,6 +10,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -82,7 +83,7 @@ public class MainActivity extends AppCompatActivity {
     private SwitchMaterial compatBox, perfBox;
     private ChipGroup presetGroup;
     private LinearLayout previewGrid, threadSeg, sizeSeg, body;
-    private MaterialCardView resultCard;
+    private LinearLayout resultCard;
     private ScrollView logScroll;
     private TextView resultTitle, resultMeta, fileInfoText;
 
@@ -192,7 +193,7 @@ public class MainActivity extends AppCompatActivity {
         // ---- 选择卡 ----
         // ---- 选择卡 ----
         body.addView(sectionLabel("选择资源包"));
-        MaterialCardView pickCard = card(0xFFF2F8F4, dp);
+        LinearLayout pickCard = card(0xFFF2F8F4, dp);
         pickBtn = mkButton("点击选择 Java 资源包（.zip / .mcpack）", "#009A4E",
                 new View.OnClickListener() {
                     @Override public void onClick(View v) { pickFile(); }
@@ -349,14 +350,18 @@ public class MainActivity extends AppCompatActivity {
         return b;
     }
 
-    private MaterialCardView card(int bg, float dp) {
-        MaterialCardView c = new MaterialCardView(this);
-        c.setCardBackgroundColor(ColorStateList.valueOf(bg));
-        c.setRadius(22 * dp);
-        c.setCardElevation(4 * dp);
-        c.setContentPadding((int) (16 * dp), (int) (14 * dp), (int) (16 * dp), (int) (14 * dp));
-        c.setStrokeColor(ColorStateList.valueOf(Color.parseColor("#E2E8E6")));
-        c.setStrokeWidth((int) (1 * dp));
+    private LinearLayout card(int bg, float dp) {
+        // 注意：MaterialCardView 继承自 FrameLayout，直接向其中 addView 多个子控件会互相
+        // 叠在左上角覆盖。这里改用纵向 LinearLayout + 圆角背景模拟卡片，子控件自然竖向排列。
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setPadding((int) (16 * dp), (int) (14 * dp), (int) (16 * dp), (int) (14 * dp));
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(bg);
+        d.setCornerRadius(22 * dp);
+        d.setStroke((int) (1 * dp), Color.parseColor("#E2E8E6"));
+        c.setBackground(d);
+        c.setElevation(4 * dp);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = (int) (8 * dp);
