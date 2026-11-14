@@ -511,7 +511,6 @@ public class MainActivity extends AppCompatActivity {
         cancelBtn.setVisibility(View.VISIBLE);
         resultCard.setVisibility(View.GONE);
         progress.setProgressCompat(0, false);
-        logText.setText("");
         appendLog("输入：" + cacheZip.length() / 1024 + " KB");
 
         final JSONObject opts = new JSONObject();

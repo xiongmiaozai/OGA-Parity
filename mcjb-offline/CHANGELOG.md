@@ -5,6 +5,19 @@
 
 ---
 
+## [1.4.1] — 2026-11-14（versionCode 6）
+
+### Bug 修复（选本地文件闪退）
+- **根因**：v1.4.0 精简 UI 时删除了「运行日志」视图（`logText`/`logScroll`），对应字段
+  不再被 `findViewById` 赋值，恒为 `null`；但 `startConvert()` 中残留一处裸调用
+  `logText.setText("")`。只有在「选完文件 → 读取 → 启动转换」这一路径才会执行到该行，
+  触发空指针（NPE）导致应用崩溃（闪退）。
+- **与权限无关**：选文件走的是系统 `ACTION_GET_CONTENT` + `ContentResolver`，不需要
+  存储权限（且应用也未声明 `READ_EXTERNAL_STORAGE`）。
+- **修复**：删除该处裸调用，运行日志相关逻辑统一走已带 null 保护的 `appendLog()`。
+
+---
+
 ## [1.4.0] — 2026-11-14（versionCode 5）
 
 ### UI（精简冗余，主路径更干净）
