@@ -51,8 +51,14 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -99,9 +105,15 @@ public class MainActivity extends AppCompatActivity {
     private TextView[] navLabels = new TextView[3];
     private int currentTab = TAB_CONVERT;
 
-    // 资源库
+    // 资源库：分组维度 / 排序方向 / 类型过滤
+    private static final int GROUP_TIME = 0, GROUP_TYPE = 1, GROUP_BATCH = 2;
+    private static final int FILTER_ALL = 0, FILTER_JAVA = 1, FILTER_BEDROCK = 2;
+
     private LibraryStore libraryStore;
-    private LinearLayout importList, exportList;
+    private LinearLayout libraryList;
+    private int libGroup = GROUP_TYPE;      // 默认按类型（Java / 基岩版）分组
+    private boolean libNewestFirst = true;  // 默认最新在前
+    private int libFilter = FILTER_ALL;     // 默认显示全部
     private String pendingExportPath = null;
     private String pendingExportName = null;
 
@@ -347,49 +359,206 @@ public class MainActivity extends AppCompatActivity {
         libraryBody.setOrientation(LinearLayout.VERTICAL);
         libraryBody.setPadding((int) (16 * dp), (int) (14 * dp), (int) (16 * dp), (int) (16 * dp));
 
-        libraryBody.addView(sectionLabel("导入的 Java 资源包"));
-        importList = new LinearLayout(this);
-        importList.setOrientation(LinearLayout.VERTICAL);
-        libraryBody.addView(importList);
+        // 分类工具条：分组维度 / 排序方向 / 类型过滤
+        LinearLayout tools = card(0xFFFFFFFF, dp);
+        TextView tt = mkText("分类与排列", 13, "#00713A");
+        tt.setTypeface(null, Typeface.BOLD);
+        tools.addView(tt);
 
-        libraryBody.addView(sectionLabel("导出的基岩版 .mcpack"));
-        exportList = new LinearLayout(this);
-        exportList.setOrientation(LinearLayout.VERTICAL);
-        libraryBody.addView(exportList);
+        tools.addView(toolLabel("分组方式", dp));
+        tools.addView(mkToggle(new String[]{"按时间", "按类型", "按批次"}, libGroup,
+                new TogglePick() {
+                    @Override public void onPick(int idx, String label) {
+                        libGroup = idx; refreshLibrary();
+                    }
+                }));
+        tools.addView(toolLabel("排序", dp));
+        tools.addView(mkToggle(new String[]{"最新在前", "最早在前"}, 0,
+                new TogglePick() {
+                    @Override public void onPick(int idx, String label) {
+                        libNewestFirst = (idx == 0); refreshLibrary();
+                    }
+                }));
+        tools.addView(toolLabel("显示", dp));
+        tools.addView(mkToggle(new String[]{"全部", "仅 Java", "仅基岩版"}, libFilter,
+                new TogglePick() {
+                    @Override public void onPick(int idx, String label) {
+                        libFilter = idx; refreshLibrary();
+                    }
+                }));
+        libraryBody.addView(tools);
+
+        libraryList = new LinearLayout(this);
+        libraryList.setOrientation(LinearLayout.VERTICAL);
+        libraryBody.addView(libraryList);
 
         libraryScroll = new ScrollView(this);
         libraryScroll.addView(libraryBody);
     }
 
+    private TextView toolLabel(String s, float dp) {
+        TextView t = mkText(s, 11, "#6B7686");
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = (int) (10 * dp);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    private final Map<String, Bitmap> iconCache = new java.util.HashMap<>();
+
+    /** 按当前「分组 / 排序 / 过滤」设置重新渲染资源库列表。 */
     private void refreshLibrary() {
-        if (importList == null || exportList == null) return;
-        importList.removeAllViews();
-        exportList.removeAllViews();
-        java.util.List<LibraryStore.Item> items = libraryStore.all();
-        boolean anyImport = false, anyExport = false;
-        for (LibraryStore.Item it : items) {
-            if (LibraryStore.KIND_IMPORT.equals(it.kind)) {
-                importList.addView(buildLibCard(it));
-                anyImport = true;
-            } else {
-                exportList.addView(buildLibCard(it));
-                anyExport = true;
+        if (libraryList == null) return;
+        libraryList.removeAllViews();
+        float dp = getResources().getDisplayMetrics().density;
+
+        List<LibraryStore.Item> all = libraryStore.all();   // 新 → 旧
+        List<LibraryStore.Item> items = new ArrayList<>();
+        for (LibraryStore.Item it : all) {
+            boolean isJava = LibraryStore.KIND_IMPORT.equals(it.kind);
+            if (libFilter == FILTER_JAVA && !isJava) continue;
+            if (libFilter == FILTER_BEDROCK && isJava) continue;
+            items.add(it);
+        }
+        if (!libNewestFirst) Collections.reverse(items);
+
+        if (items.isEmpty()) {
+            libraryList.addView(emptyHint("没有符合条件的记录，去「转换」页转换后会自动存档"));
+            return;
+        }
+
+        if (libGroup == GROUP_TYPE) {
+            List<LibraryStore.Item> java = new ArrayList<>(), be = new ArrayList<>();
+            for (LibraryStore.Item it : items)
+                (LibraryStore.KIND_IMPORT.equals(it.kind) ? java : be).add(it);
+            libraryList.addView(sectionLabel("导入的 Java 资源包 · " + java.size()));
+            addLibItems(java);
+            libraryList.addView(sectionLabel("导出的基岩版 .mcpack · " + be.size()));
+            addLibItems(be);
+
+        } else if (libGroup == GROUP_TIME) {
+            LinkedHashMap<String, List<LibraryStore.Item>> groups = new LinkedHashMap<>();
+            for (LibraryStore.Item it : items) {
+                String key = dayLabel(it.createdAt);
+                if (!groups.containsKey(key)) groups.put(key, new ArrayList<LibraryStore.Item>());
+                groups.get(key).add(it);
+            }
+            for (Map.Entry<String, List<LibraryStore.Item>> e : groups.entrySet()) {
+                libraryList.addView(sectionLabel(e.getKey() + " · " + e.getValue().size()));
+                addLibItems(e.getValue());
+            }
+
+        } else {   // 按批次：一次转换的输入包 + 产物归为一组
+            LinkedHashMap<String, List<LibraryStore.Item>> groups = new LinkedHashMap<>();
+            for (LibraryStore.Item it : items) {
+                String key = (it.batchId == null || it.batchId.isEmpty())
+                        ? "single_" + it.id : it.batchId;
+                if (!groups.containsKey(key)) groups.put(key, new ArrayList<LibraryStore.Item>());
+                groups.get(key).add(it);
+            }
+            int n = 0;
+            for (Map.Entry<String, List<LibraryStore.Item>> e : groups.entrySet()) {
+                n++;
+                List<LibraryStore.Item> g = e.getValue();
+                // 组内 Java 输入在前、基岩版产物在后
+                Collections.sort(g, new Comparator<LibraryStore.Item>() {
+                    @Override public int compare(LibraryStore.Item a, LibraryStore.Item b) {
+                        int ka = LibraryStore.KIND_IMPORT.equals(a.kind) ? 0 : 1;
+                        int kb = LibraryStore.KIND_IMPORT.equals(b.kind) ? 0 : 1;
+                        return ka - kb;
+                    }
+                });
+                String input = "";
+                long ts = 0;
+                for (LibraryStore.Item it : g) {
+                    if (it.inputName != null && !it.inputName.isEmpty()) input = it.inputName;
+                    if (it.createdAt > ts) ts = it.createdAt;
+                }
+                libraryList.addView(sectionLabel("批次 " + n + " · " + fmtTime(ts)
+                        + (input.isEmpty() ? "" : " · 输入：" + input)));
+                addLibItems(g);
             }
         }
-        if (!anyImport) importList.addView(emptyHint("还没有导入记录，去「转换」页转换后会自动存档"));
-        if (!anyExport) exportList.addView(emptyHint("还没有导出记录，转换成功后会自动出现在这里"));
+    }
+
+    private void addLibItems(List<LibraryStore.Item> list) {
+        for (LibraryStore.Item it : list) libraryList.addView(buildLibCard(it));
+    }
+
+    private String dayLabel(long ms) {
+        SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA);
+        String today = f.format(new Date());
+        String d = f.format(new Date(ms));
+        if (d.equals(today)) return "今天";
+        if (d.equals(f.format(new Date(System.currentTimeMillis() - 24 * 3600 * 1000L)))) return "昨天";
+        return d;
+    }
+
+    /** 资源包图标：优先读取包内 pack_icon.png / pack.png，缺失则用彩色字母占位。 */
+    private View makePackIcon(LibraryStore.Item it, float dp) {
+        int sz = (int) (44 * dp);
+        boolean isJava = LibraryStore.KIND_IMPORT.equals(it.kind);
+        Bitmap bm = iconCache.get(it.stored);
+        if (bm == null) {
+            byte[] png = libraryStore.iconOf(it);
+            if (png != null) {
+                try { bm = BitmapFactory.decodeByteArray(png, 0, png.length); }
+                catch (Throwable ignored) { }
+            }
+            if (bm != null) iconCache.put(it.stored, bm);
+        }
+        if (bm != null) {
+            ImageView iv = new ImageView(this);
+            iv.setLayoutParams(new LinearLayout.LayoutParams(sz, sz));
+            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            iv.setImageBitmap(bm);
+            return iv;
+        }
+        TextView t = new TextView(this);
+        t.setLayoutParams(new LinearLayout.LayoutParams(sz, sz));
+        t.setGravity(Gravity.CENTER);
+        t.setText(isJava ? "J" : "B");
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(20);
+        t.setTypeface(null, Typeface.BOLD);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(Color.parseColor(isJava ? "#009A4E" : "#0A59F7"));
+        g.setCornerRadius(12 * dp);
+        t.setBackground(g);
+        return t;
     }
 
     private LinearLayout buildLibCard(final LibraryStore.Item it) {
         float dp = getResources().getDisplayMetrics().density;
         LinearLayout c = libCard(dp);
+
+        // 头部：图标 + （标题 / 类型·大小·时间）
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(makePackIcon(it, dp));
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams boxLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        boxLp.leftMargin = (int) (12 * dp);
+        box.setLayoutParams(boxLp);
+
         TextView title = mkText(it.name, 14, "#00713A");
         title.setTypeface(null, Typeface.BOLD);
-        String sub = humanSize(it.size) + " · " + fmtTime(it.createdAt);
+        boolean isJava = LibraryStore.KIND_IMPORT.equals(it.kind);
+        String sub = (isJava ? "Java 资源包" : "基岩版 .mcpack")
+                + " · " + humanSize(it.size) + " · " + fmtTime(it.createdAt);
         if (it.inputName != null && !it.inputName.isEmpty())
             sub += "\n来自：" + it.inputName;
         TextView meta = mkText(sub, 12, "#5A6472");
-        meta.setPadding(0, (int) (4 * dp), 0, (int) (8 * dp));
+        meta.setPadding(0, (int) (4 * dp), 0, 0);
+        box.addView(title);
+        box.addView(meta);
+        head.addView(box);
+        c.addView(head);
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -402,10 +571,10 @@ public class MainActivity extends AppCompatActivity {
         row.addView(smallBtn("删除", "#D94838", new View.OnClickListener() {
             @Override public void onClick(View v) { libConfirmDelete(it); }
         }));
-
-        c.addView(title);
-        c.addView(meta);
-        c.addView(row);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = (int) (8 * dp);
+        c.addView(row, rowLp);
         return c;
     }
 
@@ -418,6 +587,7 @@ public class MainActivity extends AppCompatActivity {
                         + "\n大小：" + humanSize(it.size)
                         + "\n时间：" + fmtTime(it.createdAt)
                         + ("import".equals(it.kind) ? "" : "\n来源：" + (it.inputName.isEmpty() ? "—" : it.inputName))
+                        + ("\n批次：" + ((it.batchId == null || it.batchId.isEmpty()) ? "—（旧记录）" : it.batchId))
                         + "\n状态：" + it.status
                         + "\n路径：" + path)
                 .setPositiveButton("关闭", null)
@@ -455,6 +625,7 @@ public class MainActivity extends AppCompatActivity {
                 .setMessage(it.name + "\n删除后将无法恢复。")
                 .setPositiveButton("删除", new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int w) {
+                        iconCache.remove(it.stored);
                         libraryStore.delete(it.id);
                         refreshLibrary();
                         Toast.makeText(MainActivity.this, "已删除", Toast.LENGTH_SHORT).show();
@@ -966,9 +1137,10 @@ public class MainActivity extends AppCompatActivity {
             progress.setProgressCompat(100, true);
             File out = new File(outPath);
             pendingOutPath = out.getAbsolutePath();
-            // 落库存档：输入包 + 产物，供「资源库」面板长期查看 / 下载
-            libraryStore.addImport(cacheZip, lastInputName);
-            LibraryStore.Item ex = libraryStore.addExport(out, out.getName(), lastInputName);
+            // 落库存档：同一次转换的输入包 + 产物共享 batchId，供「按批次」归类
+            String batchId = "B" + System.currentTimeMillis();
+            libraryStore.addImport(cacheZip, lastInputName, batchId);
+            LibraryStore.Item ex = libraryStore.addExport(out, out.getName(), lastInputName, batchId);
             File exFile = libraryStore.fileOf(ex);
             resultCard.setVisibility(View.VISIBLE);
             resultTitle.setText("✅ 转换完成 · 校验通过");

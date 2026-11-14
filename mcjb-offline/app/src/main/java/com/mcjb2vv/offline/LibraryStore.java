@@ -41,7 +41,7 @@ public class LibraryStore {
 
     /** 单条记录。 */
     public static class Item {
-        public String id, kind, name, stored, inputName, status;
+        public String id, kind, name, stored, inputName, status, batchId;
         public long size, createdAt;
 
         Item(JSONObject o) {
@@ -51,6 +51,7 @@ public class LibraryStore {
             stored = o.optString("stored");
             inputName = o.optString("inputName");
             status = o.optString("status", "ok");
+            batchId = o.optString("batchId", "");
             size = o.optLong("size");
             createdAt = o.optLong("createdAt");
         }
@@ -64,7 +65,8 @@ public class LibraryStore {
                     .put("inputName", inputName)
                     .put("status", status)
                     .put("size", size)
-                    .put("createdAt", createdAt);
+                    .put("createdAt", createdAt)
+                    .put("batchId", batchId);
         }
     }
 
@@ -105,7 +107,7 @@ public class LibraryStore {
     }
 
     /** 复制源文件进库，返回存档记录（失败时返回 null）。 */
-    private Item store(File src, String kind, String origName, String inputName) {
+    private Item store(File src, String kind, String origName, String inputName, String batchId) {
         if (src == null || !src.exists()) return null;
         try {
             long ts = System.currentTimeMillis();
@@ -118,6 +120,7 @@ public class LibraryStore {
             it.name = origName;
             it.stored = dst.getName();
             it.inputName = inputName == null ? "" : inputName;
+            it.batchId = batchId == null ? "" : batchId;
             it.status = "ok";
             it.size = dst.length();
             it.createdAt = ts;
@@ -130,12 +133,43 @@ public class LibraryStore {
         }
     }
 
-    public Item addImport(File src, String origName) {
-        return store(src, KIND_IMPORT, origName, "");
+    /** 一次转换（输入包 + 产物）共享同一 batchId，供「按批次」归类。 */
+    public Item addImport(File src, String origName, String batchId) {
+        return store(src, KIND_IMPORT, origName, "", batchId);
     }
 
-    public Item addExport(File src, String origName, String inputName) {
-        return store(src, KIND_EXPORT, origName, inputName);
+    public Item addExport(File src, String origName, String inputName, String batchId) {
+        return store(src, KIND_EXPORT, origName, inputName, batchId);
+    }
+
+    /**
+     * 从资源包 zip 内读取自带图标：
+     *   Java 资源包 → 根目录 pack.png；基岩版 .mcpack → 根目录 pack_icon.png。
+     * 返回图片字节，找不到或异常返回 null（调用方回退到字母占位图标）。
+     */
+    public byte[] iconOf(Item it) {
+        File f = fileOf(it);
+        if (f == null) return null;
+        java.util.zip.ZipFile zf = null;
+        try {
+            zf = new java.util.zip.ZipFile(f);
+            String[] candidates = {"pack_icon.png", "pack.png"};
+            for (String name : candidates) {
+                java.util.zip.ZipEntry e = zf.getEntry(name);
+                if (e == null || e.getSize() > 2 * 1024 * 1024) continue;
+                try (InputStream in = zf.getInputStream(e);
+                     java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream()) {
+                    byte[] buf = new byte[8192];
+                    int r;
+                    while ((r = in.read(buf)) > 0) bos.write(buf, 0, r);
+                    return bos.toByteArray();
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (zf != null) try { zf.close(); } catch (Exception ignored) { }
+        }
+        return null;
     }
 
     /** 返回全部记录（新→旧）。 */
