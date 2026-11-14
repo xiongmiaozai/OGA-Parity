@@ -35,6 +35,13 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+
+    // 构建产物自动重命名为带版本号的规范文件名（不再依赖手工复制改名）
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            output.outputFileName = "mc-je2be-offline-v${variant.versionName}.apk"
+        }
+    }
 }
 
 // 鸿蒙/HarmonyOS 风格界面（基于 Google 开源 Material Design 3 组件库 MDC-Android）

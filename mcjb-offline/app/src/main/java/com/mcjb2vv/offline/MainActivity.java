@@ -329,7 +329,7 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout about = card(0xFFF0F6F2, dp);
         TextView aboutText = mkText(
                 "MC 材质转换器 · 离线版\n" +
-                "版本 " + appVersion() + "\n" +
+                "版本 " + appVersion() + "（内部版本 " + appBuildCode() + "）\n" +
                 "全部转换在设备本地完成，无需联网。\n" +
                 "导入的 Java 资源包与导出的基岩版 .mcpack 均可在「资源库」长期查看与下载。",
                 13, "#33414B");
@@ -345,7 +345,15 @@ public class MainActivity extends AppCompatActivity {
         try {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Exception e) {
-            return "1.4.5";
+            return "1.4.7";
+        }
+    }
+
+    private String appBuildCode() {
+        try {
+            return String.valueOf(getPackageManager().getPackageInfo(getPackageName(), 0).versionCode);
+        } catch (Exception e) {
+            return "12";
         }
     }
 
