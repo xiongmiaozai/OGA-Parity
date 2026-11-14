@@ -5,6 +5,23 @@
 
 ---
 
+## [1.4.7] — 2026-11-14（versionCode 12）
+
+### 修复：界面选择控件失效 + Java 包图标不显示
+- **选择控件点不动**：预设（原 `ChipGroup`+`Chip`）与全部分段选择器（原 `MaterialButtonToggleGroup`）
+  依赖 MDC 的 `check()` 状态机，且 `new MaterialButton(context,null,@style/...)` /
+  `new Chip(context,null,@style/...)` 把 style 误当 `defStyleAttr` 传，动态创建时经常无法选中。
+  全部改用**自绘胶囊 `TextView` + `setOnClickListener` + 手动互斥高亮**（新增 `makePill`/`paintPill`），
+  100% 可点击、不依赖任何 MDC 状态机。涉及：转换预设、线程、贴图上限、资源库的分组/排序/显示三组工具条。
+- **Java 资源包图标不显示**：原 `iconOf()` 只精确匹配 zip 根目录 `pack.png`，遇到包一层子目录
+  （`Faithful/pack.png`）、大小写不同、`.jpg` 或基岩 `pack_icon.png` 均读不到。
+  改为**遍历全部条目、按文件名忽略路径与大小写匹配**，覆盖 png/jpg 多种命名，
+  并对文件名含 `icon`/`logo` 的图片做兜底；根目录同类命名优先；加 4MB 读取上限防 OOM。
+- **图标解码**：`makePackIcon()` 增加 `inSampleSize` 降采样，避免大图 `decodeByteArray` OOM
+  后静默回退字母徽标（这也是"图标不显示"的隐藏原因之一）。
+
+---
+
 ## [1.4.6] — 2026-11-14（versionCode 11）
 
 ### 资源库：分类 / 排列 / 包图标

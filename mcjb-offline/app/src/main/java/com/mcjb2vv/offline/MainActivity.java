@@ -35,9 +35,6 @@ import com.chaquo.python.PyObject;
 import com.chaquo.python.Python;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.button.MaterialButtonToggleGroup;
-import com.google.android.material.chip.Chip;
-import com.google.android.material.chip.ChipGroup;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 import com.google.android.material.switchmaterial.SwitchMaterial;
@@ -92,7 +89,7 @@ public class MainActivity extends AppCompatActivity {
     private LinearProgressIndicator progress;
     private MaterialButton pickBtn, importBtn, historyBtn, cancelBtn, saveBtn, saveAsBtn;
     private SwitchMaterial compatBox, perfBox;
-    private ChipGroup presetGroup;
+    private LinearLayout presetGroup;   // 横向 LinearLayout 承载预设胶囊（原 ChipGroup，已改自绘）
     private LinearLayout previewGrid, threadSeg, sizeSeg, body;
     private LinearLayout resultCard;
     private ScrollView logScroll;
@@ -201,13 +198,12 @@ public class MainActivity extends AppCompatActivity {
         statusText.setVisibility(View.GONE);
         addBody(statusText);
 
-        // 预设
+        // 预设（自绘胶囊，横向滚动）
         body.addView(sectionLabel("转换预设"));
-        presetGroup = new ChipGroup(this);
-        presetGroup.setSingleSelection(true);
-        presetGroup.setSelectionRequired(false);
+        presetGroup = new LinearLayout(this);
+        presetGroup.setOrientation(LinearLayout.HORIZONTAL);
         HorizontalScrollView presetScroll = new HorizontalScrollView(this);
-        presetScroll.setHorizontalScrollBarEnabled(true);
+        presetScroll.setHorizontalScrollBarEnabled(false);
         presetScroll.addView(presetGroup);
         addBody(presetScroll);
 
@@ -503,8 +499,19 @@ public class MainActivity extends AppCompatActivity {
         if (bm == null) {
             byte[] png = libraryStore.iconOf(it);
             if (png != null) {
-                try { bm = BitmapFactory.decodeByteArray(png, 0, png.length); }
-                catch (Throwable ignored) { }
+                try {
+                    // 先取尺寸，大图按目标尺寸降采样，避免 decodeByteArray 直接 OOM
+                    BitmapFactory.Options bounds = new BitmapFactory.Options();
+                    bounds.inJustDecodeBounds = true;
+                    BitmapFactory.decodeByteArray(png, 0, png.length, bounds);
+                    int sample = 1;
+                    int maxDim = Math.max(bounds.outWidth, bounds.outHeight);
+                    int target = (int) (192 * dp);
+                    while (maxDim / sample > target) sample *= 2;
+                    BitmapFactory.Options opt = new BitmapFactory.Options();
+                    opt.inSampleSize = sample;
+                    bm = BitmapFactory.decodeByteArray(png, 0, png.length, opt);
+                } catch (Throwable ignored) { }
             }
             if (bm != null) iconCache.put(it.stored, bm);
         }
@@ -819,54 +826,63 @@ public class MainActivity extends AppCompatActivity {
         return b;
     }
 
-    /** M3 分段选择器：MaterialButtonToggleGroup（互斥、选中高亮）。 */
+    /** 分段选择器回调。 */
     private interface TogglePick { void onPick(int idx, String label); }
 
+    private static final int PILL_ON = 0xFF009A4E;
+    private static final int PILL_OFF = 0xFFE8EEF0;
+    private static final int PILL_TX_ON = 0xFFFFFFFF;
+    private static final int PILL_TX_OFF = 0xFF33414B;
+
+    /** 生成一个可点击的胶囊 TextView（圆角背景 + padding），不依赖任何 MDC 状态机。 */
+    private TextView makePill(String text, float dp) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(13);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding((int) (14 * dp), (int) (8 * dp), (int) (14 * dp), (int) (8 * dp));
+        t.setClickable(true);
+        t.setFocusable(true);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = (int) (6 * dp);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    /** 刷新胶囊选中态（背景圆角 + 文字色 + 加粗）。 */
+    private void paintPill(TextView t, boolean on, float dp) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(on ? PILL_ON : PILL_OFF);
+        g.setCornerRadius(100 * dp);
+        t.setBackground(g);
+        t.setTextColor(on ? PILL_TX_ON : PILL_TX_OFF);
+        t.setTypeface(null, on ? Typeface.BOLD : Typeface.NORMAL);
+    }
+
+    /**
+     * 分段选择器：普通胶囊 TextView + setOnClickListener + 手动互斥高亮。
+     * 替换掉原来的 MaterialButtonToggleGroup —— 后者依赖 check() 状态机且
+     * MaterialButton(context,null,@style) 误用 defStyleAttr，动态创建时经常点不动。
+     */
     private LinearLayout mkToggle(String[] labels, int defIdx, final TogglePick pick) {
         float dp = getResources().getDisplayMetrics().density;
-        MaterialButtonToggleGroup g = new MaterialButtonToggleGroup(this);
-        g.setSingleSelection(true);
-        final int[] defId = {-1};
-        ColorStateList bgOn = ColorStateList.valueOf(Color.parseColor("#009A4E"));
-        ColorStateList bgOff = ColorStateList.valueOf(Color.parseColor("#E8EEF0"));
-        ColorStateList txOn = ColorStateList.valueOf(Color.WHITE);
-        ColorStateList txOff = ColorStateList.valueOf(Color.parseColor("#33414B"));
-        for (int i = 0; i < labels.length; i++) {
-            final MaterialButton b = new MaterialButton(this,
-                    null, com.google.android.material.R.style.Widget_Material3_Button_OutlinedButton);
-            final int idx = i;
-            b.setId(View.generateViewId());
-            b.setText(labels[i]);
-            b.setTextSize(13);
-            b.setCornerRadius((int) (100 * dp));
-            b.setTag(labels[i]);
-            b.setBackgroundTintList(i == defIdx ? bgOn : bgOff);
-            b.setTextColor(i == defIdx ? txOn : txOff);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.rightMargin = (int) (6 * dp);
-            b.setLayoutParams(lp);
-            g.addView(b);
-            if (i == defIdx) defId[0] = b.getId();
-        }
-        g.check(defId[0]);
-        g.addOnButtonCheckedListener(new MaterialButtonToggleGroup.OnButtonCheckedListener() {
-            @Override public void onButtonChecked(MaterialButtonToggleGroup group,
-                                                  int checkedId, boolean isChecked) {
-                if (!isChecked) return;
-                for (int i = 0; i < group.getChildCount(); i++) {
-                    MaterialButton b = (MaterialButton) group.getChildAt(i);
-                    boolean on = b.getId() == checkedId;
-                    b.setBackgroundTintList(on ? bgOn : bgOff);
-                    b.setTextColor(on ? txOn : txOff);
-                }
-                Object tag = group.findViewById(checkedId).getTag();
-                if (tag != null) pick.onPick(group.indexOfChild(group.findViewById(checkedId)), tag.toString());
-            }
-        });
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.HORIZONTAL);
-        wrap.addView(g);
+        final TextView[] pills = new TextView[labels.length];
+        for (int i = 0; i < labels.length; i++) {
+            final int idx = i;
+            final TextView t = makePill(labels[i], dp);
+            t.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    for (int k = 0; k < pills.length; k++) paintPill(pills[k], k == idx, dp);
+                    if (pick != null) pick.onPick(idx, labels[idx]);
+                }
+            });
+            pills[i] = t;
+            wrap.addView(t);
+        }
+        for (int k = 0; k < pills.length; k++) paintPill(pills[k], k == defIdx, dp);
         return wrap;
     }
 
@@ -917,40 +933,36 @@ public class MainActivity extends AppCompatActivity {
 
     private void buildPresets(String json) {
         presetGroup.removeAllViews();
+        float dp = getResources().getDisplayMetrics().density;
         try {
             JSONArray arr = new JSONArray(json);
+            final java.util.List<TextView> pills = new ArrayList<>();
+            final java.util.List<String> ids = new ArrayList<>();
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject p = arr.getJSONObject(i);
                 final String id = p.optString("id", "vv_standard");
                 final String name = p.optString("name", id);
-                final Chip chip = new Chip(this,
-                        null, com.google.android.material.R.style.Widget_Material3_Chip_Filter);
-                chip.setText(name);
-                chip.setCheckable(true);
-                chip.setChecked(id.equals(selectedPreset));
+                final TextView chip = makePill(name, dp);
                 chip.setTag(id);
-                ColorStateList cOn = ColorStateList.valueOf(Color.parseColor("#009A4E"));
-                ColorStateList cOff = ColorStateList.valueOf(Color.parseColor("#E8EEF0"));
-                ColorStateList tOn = ColorStateList.valueOf(Color.WHITE);
-                ColorStateList tOff = ColorStateList.valueOf(Color.parseColor("#33414B"));
-                chip.setChipBackgroundColor(i == 0 ? cOn : cOff);
-                chip.setTextColor(i == 0 ? tOn : tOff);
-                chip.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
-                    @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean checked) {
-                        if (checked) {
-                            selectedPreset = id;
-                            for (int k = 0; k < presetGroup.getChildCount(); k++) {
-                                Chip c = (Chip) presetGroup.getChildAt(k);
-                                boolean o = c == chip;
-                                c.setChipBackgroundColor(o ? cOn : cOff);
-                                c.setTextColor(o ? tOn : tOff);
-                            }
-                            appendLog("预设：" + name);
+                chip.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        selectedPreset = id;
+                        for (int k = 0; k < pills.size(); k++) {
+                            TextView c = pills.get(k);
+                            paintPill(c, c == chip, dp);
                         }
+                        appendLog("预设：" + name);
                     }
                 });
+                pills.add(chip);
+                ids.add(id);
                 presetGroup.addView(chip);
             }
+            // 初始高亮：按 selectedPreset 匹配，匹配不到则高亮第一个
+            int hi = 0;
+            for (int k = 0; k < ids.size(); k++) if (ids.get(k).equals(selectedPreset)) { hi = k; break; }
+            for (int k = 0; k < pills.size(); k++) paintPill(pills.get(k), k == hi, dp);
+            if (!ids.isEmpty() && hi < ids.size()) selectedPreset = ids.get(hi);
         } catch (Exception ignored) { }
     }
 

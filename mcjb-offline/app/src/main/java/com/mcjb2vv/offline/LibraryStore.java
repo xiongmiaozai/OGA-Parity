@@ -143,27 +143,55 @@ public class LibraryStore {
     }
 
     /**
-     * 从资源包 zip 内读取自带图标：
-     *   Java 资源包 → 根目录 pack.png；基岩版 .mcpack → 根目录 pack_icon.png。
-     * 返回图片字节，找不到或异常返回 null（调用方回退到字母占位图标）。
+     * 从资源包 zip 内读取自带图标，返回图片字节；找不到或异常返回 null。
+     *
+     * 关键点：Java 资源包图标通常是根目录 pack.png，基岩版是 pack_icon.png，
+     * 但很多包会把内容整体包一层子目录（如 "Faithful/pack.png"），或大小写不同、
+     * 用 .jpg。因此这里遍历全部条目，取「文件名」（忽略路径）做大小写不敏感匹配，
+     * 根目录者优先、命名优先级高者优先，避免因路径差异而读不到图标。
      */
     public byte[] iconOf(Item it) {
         File f = fileOf(it);
         if (f == null) return null;
+        final String[] cand = {
+                "pack_icon.png", "pack_icon.jpg", "pack_icon.jpeg",
+                "pack.png", "pack.jpg", "pack.jpeg"
+        };
         java.util.zip.ZipFile zf = null;
         try {
             zf = new java.util.zip.ZipFile(f);
-            String[] candidates = {"pack_icon.png", "pack.png"};
-            for (String name : candidates) {
-                java.util.zip.ZipEntry e = zf.getEntry(name);
-                if (e == null || e.getSize() > 2 * 1024 * 1024) continue;
-                try (InputStream in = zf.getInputStream(e);
-                     java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream()) {
-                    byte[] buf = new byte[8192];
-                    int r;
-                    while ((r = in.read(buf)) > 0) bos.write(buf, 0, r);
-                    return bos.toByteArray();
+            java.util.zip.ZipEntry best = null;
+            int bestScore = -1;
+            java.util.Enumeration<? extends java.util.zip.ZipEntry> en = zf.entries();
+            while (en.hasMoreElements()) {
+                java.util.zip.ZipEntry e = en.nextElement();
+                if (e.isDirectory()) continue;
+                String full = e.getName();
+                String base = full.substring(full.lastIndexOf('/') + 1).toLowerCase(java.util.Locale.US);
+                boolean isImg = base.endsWith(".png") || base.endsWith(".jpg") || base.endsWith(".jpeg");
+                int pri = -1;
+                for (int i = 0; i < cand.length; i++) if (base.equals(cand[i])) { pri = cand.length - i; break; }
+                // 兜底：包内没有标准命名时，取文件名含 icon/logo 的图片（如 logo.png / myicon.jpg）
+                boolean fallbackName = pri < 0 && isImg
+                        && (base.contains("icon") || base.contains("logo"));
+                if (pri < 0 && !fallbackName) continue;
+                boolean atRoot = full.indexOf('/') < 0;
+                int score = (pri < 0 ? 1 : (pri + 1) * 10) + (atRoot ? 1 : 0);  // 根目录同类命名优先
+                long sz = e.getSize();
+                if (sz == 0 || sz > 4 * 1024 * 1024) continue;   // 跳过空/超大，防 OOM
+                if (score > bestScore) { bestScore = score; best = e; }
+            }
+            if (best == null) return null;
+            try (InputStream in = zf.getInputStream(best);
+                 java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream()) {
+                byte[] buf = new byte[8192];
+                int r, total = 0;
+                while ((r = in.read(buf)) > 0) {
+                    total += r;
+                    if (total > 4 * 1024 * 1024) return null;   // 双保险
+                    bos.write(buf, 0, r);
                 }
+                return bos.toByteArray();
             }
         } catch (Exception ignored) {
         } finally {
