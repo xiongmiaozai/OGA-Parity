@@ -25,13 +25,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".LibraryActivity"
-            android:exported="false"
-            android:parentActivityName=".MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density|uiMode"
-            android:label="资源库" />
-
         <!-- 将私有库内 .mcpack 通过 uri 授权给 Minecraft 基岩版打开 -->
         <provider
             android:name="androidx.core.content.FileProvider"
