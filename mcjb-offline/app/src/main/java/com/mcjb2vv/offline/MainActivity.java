@@ -95,6 +95,8 @@ public class MainActivity extends AppCompatActivity {
     private int selectedMaxSize = 2048;
     private File rulesDir, dataDir, cacheZip;
     private String currentTid = "";
+    private LibraryStore libraryStore;
+    private String lastInputName = "input_pack.zip";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -104,6 +106,7 @@ public class MainActivity extends AppCompatActivity {
         dataDir = new File(getFilesDir(), "mcjb");
         rulesDir = new File(dataDir, "rules");
         cacheZip = new File(getCacheDir(), "input_pack.zip");
+        libraryStore = new LibraryStore(this);
         copyAssetRules();
 
         // ---- 顶栏（MaterialToolbar + 离线徽标）----
@@ -256,8 +259,10 @@ public class MainActivity extends AppCompatActivity {
                 });
         saveAsBtn.setVisibility(View.GONE);
         resultCard.addView(saveAsBtn);
-        historyBtn = mkButton("查看转换历史", "#6B7686", new View.OnClickListener() {
-            @Override public void onClick(View v) { showHistory(); }
+        historyBtn = mkButton("打开资源库（导入 / 导出存档）", "#6B7686", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, LibraryActivity.class));
+            }
         });
         resultCard.addView(historyBtn);
         body.addView(resultCard);
@@ -528,6 +533,7 @@ public class MainActivity extends AppCompatActivity {
         if (req != REQ_FILE) return;
         if (res != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
+        lastInputName = queryDisplayName(uri);
         try (InputStream in = getContentResolver().openInputStream(uri);
              OutputStream out = new FileOutputStream(cacheZip)) {
             byte[] buf = new byte[1 << 16];
@@ -662,25 +668,30 @@ public class MainActivity extends AppCompatActivity {
             progress.setProgressCompat(100, true);
             File out = new File(outPath);
             pendingOutPath = out.getAbsolutePath();
+            // 落库存档：输入包 + 产物，供「资源库」面板长期查看 / 下载
+            libraryStore.addImport(cacheZip, lastInputName);
+            LibraryStore.Item ex = libraryStore.addExport(out, out.getName(), lastInputName);
+            File exFile = libraryStore.fileOf(ex);
             resultCard.setVisibility(View.VISIBLE);
             resultTitle.setText("✅ 转换完成 · 校验通过");
             resultMeta.setText(out.getName() + "（" + out.length() / 1024 + " KB）· 已用 "
                     + s.optString("elapsed_text", ""));
             buildPreview(s.optJSONObject("previews"));
-            // 自动尝试写入下载目录；无论结果都提供「保存」按钮，确保用户拿得到文件
-            Uri exported = exportPack(out);
-            saveBtn.setVisibility(View.VISIBLE);
-            saveAsBtn.setVisibility(View.VISIBLE);
-            if (exported != null) {
-                pendingImportUri = exported.toString();
-                importBtn.setVisibility(View.VISIBLE);
-                notifyDone(out.getName(), exported);
-                statusText.setText("已自动保存到「下载」目录：" + out.getName()
-                        + "（" + out.length() / 1024 + " KB）。也可点「另存为…」自选位置。");
-            } else {
-                statusText.setText("转换完成。部分系统不便自动写入下载目录，请点「另存为…」"
-                        + "自行选择保存位置。");
+            // 「下载」统一走 SAF（另存为 / 资源库导出），离线无权限、全版本可靠；
+            // 不再依赖 MediaStore.Downloads（Android 11+ 对非媒体文件写入受限会失败）
+            if (exFile != null) {
+                try {
+                    Uri shareUri = androidx.core.content.FileProvider.getUriForFile(
+                            this, getPackageName() + ".fileprovider", exFile);
+                    pendingImportUri = shareUri.toString();
+                    importBtn.setVisibility(View.VISIBLE);
+                    notifyDone(out.getName(), shareUri);
+                } catch (Exception ignored) {
+                    importBtn.setVisibility(View.GONE);
+                }
             }
+            saveAsBtn.setVisibility(View.VISIBLE);
+            statusText.setText("已存入资源库：导入包与 .mcpack 均可在「打开资源库」中查看 / 下载。");
         });
     }
 
@@ -799,6 +810,23 @@ public class MainActivity extends AppCompatActivity {
         byte[] buf = new byte[1 << 16];
         int r;
         while ((r = in.read(buf)) > 0) out.write(buf, 0, r);
+    }
+
+    /** 从内容 URI 取原始文件名（用于资源库存档展示）。 */
+    private String queryDisplayName(Uri uri) {
+        try {
+            android.database.Cursor c = getContentResolver().query(uri,
+                    new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null);
+            if (c != null) {
+                try {
+                    if (c.moveToFirst()) {
+                        String n = c.getString(0);
+                        if (n != null && !n.isEmpty()) return n;
+                    }
+                } finally { c.close(); }
+            }
+        } catch (Exception ignored) { }
+        return "input_pack.zip";
     }
 
     private void openImport() {

@@ -5,6 +5,31 @@
 
 ---
 
+## [1.4.3] — 2026-11-14（versionCode 8）
+
+### Bug 根因：转换后的文件「无法下载」
+- **根因**：原 `exportPack()` 走 `MediaStore.Downloads` 自动写公共下载目录。Android 11+
+  对非媒体文件（`.mcpack`/`.zip` 属 `application/octet-stream`）写入 `MediaStore.Downloads`
+  **需要 `WRITE_EXTERNAL_STORAGE` / `MANAGE_EXTERNAL_STORAGE`**，而本应用为「完全离线、
+  最小权限」未申请，故 `insert()` 在现代设备上必然失败；且旧代码用
+  `catch(Exception){return null;}` 把错误静默吞掉，用户看到「完成」却找不到文件。
+- **修复**：下载统一改为 **SAF（`ACTION_CREATE_DOCUMENT`）**——用户主动选位置、系统级
+  授权，**无需任何存储权限、离线、全 Android 版本可靠**。
+
+### 新增：独立「资源库」面板（替换原"查看历史"对话框）
+- 新 `LibraryActivity`：顶栏返回 + 两组列表——
+  - **导入的 Java 资源包**（转换时自动存档，记录原始文件名）
+  - **导出的基岩版 .mcpack**（转换成功自动存档）
+- 每条支持：**查看**（详情：类型/大小/时间/来源/状态/路径）、**下载**（SAF 导出到本机
+  任意位置，含下载目录）、**删除**。
+- 转换完成时由 `LibraryStore` 把输入包与产物**落库存档**到应用私有目录并写
+  `library.json` 索引，长期保留、不会因缓存被回收而丢失。
+- 主界面结果卡原「查看转换历史」改为「打开资源库（导入 / 导出存档）」；
+  「用 Minecraft 基岩版打开」通过 `FileProvider` 授权私有 `.mcpack`，可被基岩版导入。
+- 移除原先误导性的「保存到下载目录（MediaStore）」按钮。
+
+---
+
 ## [1.4.2] — 2026-11-14（versionCode 7）
 
 ### UI 布局修复（全程代码拼装，统一全宽避免散乱）
