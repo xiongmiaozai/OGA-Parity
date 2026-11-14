@@ -21,6 +21,7 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.HorizontalScrollView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -70,16 +71,17 @@ public class MainActivity extends AppCompatActivity {
 
     private static final int REQ_FILE = 2001;
     private static final int REQ_PERM = 2002;
+    private static final int REQ_SAVE = 2003;
     private static final String CHANNEL = "mcjb_offline";
 
     private final ExecutorService pyExec = Executors.newSingleThreadExecutor();
 
     private TextView statusText, stageText, logText;
     private LinearProgressIndicator progress;
-    private MaterialButton pickBtn, importBtn, historyBtn, cancelBtn;
+    private MaterialButton pickBtn, importBtn, historyBtn, cancelBtn, saveBtn, saveAsBtn;
     private SwitchMaterial compatBox, perfBox;
     private ChipGroup presetGroup;
-    private LinearLayout previewGrid, threadSeg, sizeSeg;
+    private LinearLayout previewGrid, threadSeg, sizeSeg, body;
     private MaterialCardView resultCard;
     private ScrollView logScroll;
     private TextView resultTitle, resultMeta, fileInfoText;
@@ -87,6 +89,7 @@ public class MainActivity extends AppCompatActivity {
     private volatile boolean initialized = false;
     private volatile boolean converting = false;
     private String pendingImportUri = null;
+    private String pendingOutPath = null;   // 转换产物本地路径，供「保存」使用
     private String selectedPreset = "vv_standard";
     private int selectedThreads = 0;   // 0=自动
     private int selectedMaxSize = 2048;
@@ -113,29 +116,29 @@ public class MainActivity extends AppCompatActivity {
         bar.setPadding(barPad, barPad, barPad, barPad);
 
         // ---- 主体（可滚动）----
-        LinearLayout body = new LinearLayout(this);
+        body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setPadding((int) (16 * dp), (int) (14 * dp), (int) (16 * dp), (int) (16 * dp));
 
         statusText = mkText("正在初始化本地转换引擎…", 14, "#333A45");
         statusText.setVisibility(View.GONE);   // 仅出错/完成时显示，平时不占位置
-        body.addView(statusText);
+        addBody(statusText);
 
         // ---- 预设 ----
         body.addView(sectionLabel("转换预设"));
         presetGroup = new ChipGroup(this);
         presetGroup.setSingleSelection(true);
         presetGroup.setSelectionRequired(false);
-        ScrollView presetScroll = new ScrollView(this);
+        HorizontalScrollView presetScroll = new HorizontalScrollView(this);
         presetScroll.setHorizontalScrollBarEnabled(true);
         presetScroll.addView(presetGroup);
-        body.addView(presetScroll);
+        addBody(presetScroll);
 
         // ---- 选项 ----
         body.addView(sectionLabel("转换选项"));
         // 性能模式：对大包体验提升明显，保持显眼
         perfBox = mkSwitch("性能模式（极速编码 + 贴图上限 256，更快更小，略损细节）");
-        body.addView(perfBox);
+        addBody(perfBox);
 
         // 高级选项（默认折叠）：兼容模式 / 线程 / 贴图上限，普通用户无需调整
         final TextView advToggle = mkText("高级选项 ▸", 14, "#009A4E");
@@ -180,9 +183,10 @@ public class MainActivity extends AppCompatActivity {
                 advToggle.setText(advOpen[0] ? "高级选项 ▾" : "高级选项 ▸");
             }
         });
-        body.addView(advToggle);
-        body.addView(adv);
+        addBody(advToggle);
+        addBody(adv);
 
+        // ---- 选择卡 ----
         // ---- 选择卡 ----
         body.addView(sectionLabel("选择资源包"));
         MaterialCardView pickCard = card(0xFFF2F8F4, dp);
@@ -240,6 +244,18 @@ public class MainActivity extends AppCompatActivity {
                 });
         importBtn.setVisibility(View.GONE);
         resultCard.addView(importBtn);
+        saveBtn = mkButton("保存到下载目录", "#009A4E",
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { doSaveToDownloads(); }
+                });
+        saveBtn.setVisibility(View.GONE);
+        resultCard.addView(saveBtn);
+        saveAsBtn = mkButton("另存为…（选择保存位置）", "#0A59F7",
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { doSaveAs(); }
+                });
+        saveAsBtn.setVisibility(View.GONE);
+        resultCard.addView(saveAsBtn);
         historyBtn = mkButton("查看转换历史", "#6B7686", new View.OnClickListener() {
             @Override public void onClick(View v) { showHistory(); }
         });
@@ -287,6 +303,15 @@ public class MainActivity extends AppCompatActivity {
         lp.setMargins(0, (int) (14 * dp), 0, (int) (4 * dp));
         t.setLayoutParams(lp);
         return t;
+    }
+
+    /** 把控件以「全宽 + 统一上间距」加入主体，避免散乱（不传 LayoutParams 会左对齐窄条）。 */
+    private void addBody(View v) {
+        float dp = getResources().getDisplayMetrics().density;
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = (int) (8 * dp);
+        body.addView(v, lp);
     }
 
     private SwitchMaterial mkSwitch(String text) {
@@ -486,6 +511,20 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_SAVE) {
+            if (res == RESULT_OK && data != null && data.getData() != null
+                    && pendingOutPath != null) {
+                try (InputStream in = new java.io.FileInputStream(pendingOutPath);
+                     OutputStream out = getContentResolver().openOutputStream(data.getData())) {
+                    copy(in, out);
+                    ui(() -> Toast.makeText(this, "已保存到你选择的位置", Toast.LENGTH_LONG).show());
+                } catch (Exception e) {
+                    ui(() -> Toast.makeText(this, "另存为失败：" + e.getMessage(),
+                            Toast.LENGTH_LONG).show());
+                }
+            }
+            return;
+        }
         if (req != REQ_FILE) return;
         if (res != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
@@ -622,20 +661,25 @@ public class MainActivity extends AppCompatActivity {
             }
             progress.setProgressCompat(100, true);
             File out = new File(outPath);
+            pendingOutPath = out.getAbsolutePath();
             resultCard.setVisibility(View.VISIBLE);
             resultTitle.setText("✅ 转换完成 · 校验通过");
             resultMeta.setText(out.getName() + "（" + out.length() / 1024 + " KB）· 已用 "
                     + s.optString("elapsed_text", ""));
             buildPreview(s.optJSONObject("previews"));
+            // 自动尝试写入下载目录；无论结果都提供「保存」按钮，确保用户拿得到文件
             Uri exported = exportPack(out);
+            saveBtn.setVisibility(View.VISIBLE);
+            saveAsBtn.setVisibility(View.VISIBLE);
             if (exported != null) {
                 pendingImportUri = exported.toString();
-                statusText.setText("产物已保存到下载目录：" + out.getName()
-                        + "（" + out.length() / 1024 + " KB）");
                 importBtn.setVisibility(View.VISIBLE);
                 notifyDone(out.getName(), exported);
+                statusText.setText("已自动保存到「下载」目录：" + out.getName()
+                        + "（" + out.length() / 1024 + " KB）。也可点「另存为…」自选位置。");
             } else {
-                statusText.setText("转换完成，但导出失败：" + out.getAbsolutePath());
+                statusText.setText("转换完成。部分系统不便自动写入下载目录，请点「另存为…」"
+                        + "自行选择保存位置。");
             }
         });
     }
@@ -769,6 +813,37 @@ public class MainActivity extends AppCompatActivity {
                     .setTitle("无法直接打开")
                     .setMessage("请到系统「下载」目录找到 .mcpack 文件，点击后选择 Minecraft 基岩版导入。\n\n" + e)
                     .setPositiveButton("知道了", null).show();
+        }
+    }
+
+    /** 重新写入系统「下载」目录并反馈结果（不依赖任何权限，走 MediaStore）。 */
+    private void doSaveToDownloads() {
+        if (pendingOutPath == null) return;
+        File out = new File(pendingOutPath);
+        Uri exported = exportPack(out);
+        if (exported != null) {
+            pendingImportUri = exported.toString();
+            importBtn.setVisibility(View.VISIBLE);
+            notifyDone(out.getName(), exported);
+            Toast.makeText(this, "已保存到「下载」目录：" + out.getName(), Toast.LENGTH_LONG).show();
+        } else {
+            Toast.makeText(this, "自动写入下载目录失败，请用「另存为…」选择位置",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** 通过系统文件选择器（SAF）让用户自选保存位置，离线、无需任何权限。 */
+    private void doSaveAs() {
+        if (pendingOutPath == null) return;
+        File out = new File(pendingOutPath);
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/octet-stream");
+        i.putExtra(Intent.EXTRA_TITLE, out.getName());
+        try {
+            startActivityForResult(i, REQ_SAVE);
+        } catch (Exception e) {
+            Toast.makeText(this, "无法打开保存选择器", Toast.LENGTH_LONG).show();
         }
     }
 
