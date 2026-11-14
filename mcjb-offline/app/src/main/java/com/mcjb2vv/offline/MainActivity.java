@@ -112,22 +112,13 @@ public class MainActivity extends AppCompatActivity {
         int barPad = (int) (12 * dp);
         bar.setPadding(barPad, barPad, barPad, barPad);
 
-        TextView badge = new TextView(this);
-        badge.setText(R.string.offline_badge);
-        badge.setTextColor(Color.parseColor("#B8E6CC"));
-        badge.setTextSize(11);
-        MaterialToolbar.LayoutParams blp = new MaterialToolbar.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        blp.gravity = Gravity.END;
-        badge.setLayoutParams(blp);
-        bar.addView(badge);
-
         // ---- 主体（可滚动）----
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setPadding((int) (16 * dp), (int) (14 * dp), (int) (16 * dp), (int) (16 * dp));
 
         statusText = mkText("正在初始化本地转换引擎…", 14, "#333A45");
+        statusText.setVisibility(View.GONE);   // 仅出错/完成时显示，平时不占位置
         body.addView(statusText);
 
         // ---- 预设 ----
@@ -142,10 +133,20 @@ public class MainActivity extends AppCompatActivity {
 
         // ---- 选项 ----
         body.addView(sectionLabel("转换选项"));
-        compatBox = mkSwitch("兼容模式（去 PBR / 引擎门槛 1.20.0，旧设备可用）");
+        // 性能模式：对大包体验提升明显，保持显眼
         perfBox = mkSwitch("性能模式（极速编码 + 贴图上限 256，更快更小，略损细节）");
-        body.addView(compatBox);
         body.addView(perfBox);
+
+        // 高级选项（默认折叠）：兼容模式 / 线程 / 贴图上限，普通用户无需调整
+        final TextView advToggle = mkText("高级选项 ▸", 14, "#009A4E");
+        advToggle.setTypeface(Typeface.DEFAULT_BOLD);
+        advToggle.setPadding(0, (int) (10 * dp), 0, (int) (2 * dp));
+        final LinearLayout adv = new LinearLayout(this);
+        adv.setOrientation(LinearLayout.VERTICAL);
+        adv.setVisibility(View.GONE);
+
+        compatBox = mkSwitch("兼容模式（去 PBR / 引擎门槛 1.20.0，旧设备可用）");
+        adv.addView(compatBox);
 
         LinearLayout threadWrap = new LinearLayout(this);
         threadWrap.setOrientation(LinearLayout.HORIZONTAL);
@@ -157,7 +158,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         threadWrap.addView(threadSeg);
-        body.addView(threadWrap);
+        adv.addView(threadWrap);
 
         LinearLayout sizeWrap = new LinearLayout(this);
         sizeWrap.setOrientation(LinearLayout.HORIZONTAL);
@@ -169,7 +170,18 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         sizeWrap.addView(sizeSeg);
-        body.addView(sizeWrap);
+        adv.addView(sizeWrap);
+
+        final boolean[] advOpen = {false};
+        advToggle.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                advOpen[0] = !advOpen[0];
+                adv.setVisibility(advOpen[0] ? View.VISIBLE : View.GONE);
+                advToggle.setText(advOpen[0] ? "高级选项 ▾" : "高级选项 ▸");
+            }
+        });
+        body.addView(advToggle);
+        body.addView(adv);
 
         // ---- 选择卡 ----
         body.addView(sectionLabel("选择资源包"));
@@ -233,19 +245,6 @@ public class MainActivity extends AppCompatActivity {
         });
         resultCard.addView(historyBtn);
         body.addView(resultCard);
-
-        // ---- 日志 ----
-        body.addView(sectionLabel("运行日志"));
-        logText = mkText("", 11, "#7A8492");
-        logText.setTypeface(Typeface.MONOSPACE);
-        logScroll = new ScrollView(this);
-        logScroll.addView(logText, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        LinearLayout.LayoutParams logLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        logLp.topMargin = (int) (8 * dp);
-        logLp.height = (int) (120 * dp);
-        body.addView(logScroll, logLp);
 
         ScrollView rootScroll = new ScrollView(this);
         rootScroll.addView(body);
@@ -408,7 +407,10 @@ public class MainActivity extends AppCompatActivity {
             @Override public void run() {
                 App app = (App) getApplication();
                 if (!app.awaitPython(60000)) {
-                    ui(() -> statusText.setText("Python 运行时启动失败：" + app.getInitError()));
+                    ui(() -> {
+                        statusText.setText("Python 运行时启动失败：" + app.getInitError());
+                        statusText.setVisibility(View.VISIBLE);
+                    });
                     return;
                 }
                 try {
@@ -418,10 +420,7 @@ public class MainActivity extends AppCompatActivity {
                     initialized = true;
                     final String presetsJson = mod.callAttr("presets").toJava(String.class);
                     ui(() -> {
-                        statusText.setText("本地引擎就绪 · 规则包 " + ver);
                         pickBtn.setEnabled(true);
-                        appendLog("init 完成 | 规则包 " + ver);
-                        appendLog("转换全程在设备本地完成，未申请联网权限。");
                         buildPresets(presetsJson);
                     });
                 } catch (Throwable t) {
@@ -532,7 +531,7 @@ public class MainActivity extends AppCompatActivity {
                     String tid = mod.callAttr("start", cacheZip.getAbsolutePath(),
                             opts.toString()).toJava(String.class);
                     currentTid = tid;
-                    ui(() -> stageText.setText("转换中 · 任务 " + tid));
+                    ui(() -> stageText.setText("转换中"));
                     long deadline = System.currentTimeMillis() + 30 * 60 * 1000L;
                     while (System.currentTimeMillis() < deadline) {
                         String js = mod.callAttr("poll", tid).toJava(String.class);
@@ -619,6 +618,7 @@ public class MainActivity extends AppCompatActivity {
             if (!"SUCCESS".equals(state)) {
                 stageText.setText("转换未成功：" + state + (err.isEmpty() ? "" : " · " + err));
                 statusText.setText("请检查输入包是否为有效 Java 资源包");
+                statusText.setVisibility(View.VISIBLE);
                 return;
             }
             progress.setProgressCompat(100, true);
@@ -799,6 +799,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void appendLog(String line) {
+        if (logText == null) return;   // 运行日志 UI 已移除
         logText.append(line + "\n");
         logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
     }
